@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tahoe House Operator · MVP</title>
+  <style>
+    body{font:16px/1.45 system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 18px;color:#24384b}
+    h1,h2{color:#1d4268}label{display:block;margin:12px 0 4px}input{padding:8px;max-width:260px}
+    button{margin-top:16px;padding:9px 15px;background:#1d4268;color:white;border:0;border-radius:5px;cursor:pointer}
+    pre{background:#f3f6f8;padding:14px;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:6px}
+    .note{color:#16834b}.row{display:flex;gap:16px;flex-wrap:wrap}
+    #messages{border:1px solid #ccd6df;border-radius:7px;padding:12px;min-height:150px;max-height:460px;overflow:auto}
+    .message{white-space:pre-wrap;padding:10px;margin:7px 0;border-radius:6px;max-width:88%}
+    .user{background:#eaf2fb;margin-left:auto}.assistant{background:#f2f6f4}.chat-input{width:min(760px,75vw);max-width:none}
+  </style>
+</head>
+<body>
+  <h1>Tahoe House Operator</h1>
+  <p class="note">MVP · Synthetic fixture data · No messages are sent and no calendar write is made without approval.</p>
+  <p class="note">Chat text and recent turns are sent to your configured model gateway for request parsing. Avoid real guest or financial data in this MVP.</p>
+  <h2>Ask the property assistant</h2>
+  <p>Ask in plain language about occupancy, date availability, a proposed stay, trash, parking, or stored house rules. Pricing, turnover, guest messaging, and finance are not implemented in this MVP.</p>
+  <div id="messages" aria-live="polite"></div>
+  <form id="chat-form">
+    <label for="chat-message">Your question</label>
+    <input id="chat-message" name="message" class="chat-input" maxlength="4000" placeholder="Can I stay Nov 14–15, and is the calendar clear?" required>
+    <button id="chat-send" type="submit">Ask</button>
+  </form>
+  <details><summary>Last chat tool trace</summary><pre id="chat-trace">Tool calls and citations will appear here.</pre></details>
+  <h2>Check a stay and calendar</h2>
+  <form id="run-form">
+    <label>Request <input name="prompt" value="Check a Saturday stay and storm/trash rules" size="48"></label>
+    <div class="row">
+      <label>Stay start <input name="start_date" type="date" value="2026-11-14"></label>
+      <label>Stay end <input name="end_date" type="date" value="2026-11-15"></label>
+      <label>Trash check date <input name="trash_date" type="date" value="2026-11-13"></label>
+    </div>
+    <div class="row">
+      <label>Guests <input name="guest_count" type="number" min="1" value="2"></label>
+      <label>Renter age <input name="renter_age" type="number" min="18" value="35"></label>
+      <label>Vehicles <input name="vehicles" type="number" min="0" value="1"></label>
+    </div>
+    <details>
+      <summary>Optional operator correction (used only if a check fails)</summary>
+      <div class="row">
+        <label>Corrected start <input name="revision_start" type="date"></label>
+        <label>Corrected end <input name="revision_end" type="date"></label>
+      </div>
+    </details>
+    <button type="submit">Run checks</button>
+  </form>
+  <h2>Run trace</h2><pre id="result">Submit a request to see the trace.</pre>
+  <h2>Calendar view</h2><pre id="calendar">Calendar events will appear with the run trace.</pre>
+  <h2>Corpus retrieval inspector</h2>
+  <form id="corpus-form"><label>Search local rules <input name="query" value="bear box storm pickup" size="42"></label><button type="submit">Search corpus</button></form>
+  <pre id="corpus-result">Search results include passages and source metadata.</pre>
+  <script>
+    const messages=document.querySelector('#messages');
+    let chatSessionId=localStorage.getItem('tahoe-chat-session')||null;
+    function addMessage(role,text){const item=document.createElement('div');item.className='message '+role;item.textContent=text;messages.appendChild(item);messages.scrollTop=messages.scrollHeight;}
+    document.querySelector('#chat-form').addEventListener('submit',async event=>{
+      event.preventDefault();
+      const input=document.querySelector('#chat-message');const message=input.value.trim();if(!message)return;
+      addMessage('user',message);input.value='';
+      const button=document.querySelector('#chat-send');button.disabled=true;button.textContent='Working…';
+      try{
+        const response=await fetch('/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message,session_id:chatSessionId})});
+        const data=await response.json();
+        if(!response.ok)throw new Error(data.detail||'Chat request failed');
+        chatSessionId=data.session_id;localStorage.setItem('tahoe-chat-session',chatSessionId);
+        addMessage('assistant',data.answer);
+        document.querySelector('#chat-trace').textContent=JSON.stringify({tasks:data.tasks,critic:data.critic,citations:data.citations,tool_trace:data.tool_trace},null,2);
+      }catch(error){addMessage('assistant','I could not complete that request: '+String(error))}
+      finally{button.disabled=false;button.textContent='Ask';input.focus()}
+    });
+    const form=document.querySelector('#run-form');
+    form.addEventListener('submit',async event=>{
+      event.preventDefault();
+      const raw=Object.fromEntries(new FormData(form));
+      for(const key of ['guest_count','renter_age','vehicles']) raw[key]=Number(raw[key]);
+      const revision={};
+      if(raw.revision_start) revision.start_date=raw.revision_start;
+      if(raw.revision_end) revision.end_date=raw.revision_end;
+      delete raw.revision_start;delete raw.revision_end;
+      if(Object.keys(revision).length) raw.operator_revision=revision;
+      document.querySelector('#result').textContent='Running…';
+      try{
+        const response=await fetch('/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(raw)});
+        const data=await response.json();
+        document.querySelector('#result').textContent=JSON.stringify(data,null,2);
+        const calendarSlice=(data.slices||[]).find(slice=>slice.name==='calendar');
+        document.querySelector('#calendar').textContent=JSON.stringify(calendarSlice||{},null,2);
+      }catch(error){document.querySelector('#result').textContent=String(error)}
+    });
+    document.querySelector('#corpus-form').addEventListener('submit',async event=>{
+      event.preventDefault();
+      const query=new FormData(event.currentTarget).get('query');
+      const target=document.querySelector('#corpus-result');target.textContent='Searching…';
+      try{const response=await fetch('/corpus/search?query='+encodeURIComponent(query));target.textContent=JSON.stringify(await response.json(),null,2)}
+      catch(error){target.textContent=String(error)}
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "permit_id": "SYNTHETIC-STR-001",
+  "zone": "SYNTHETIC-RESIDENTIAL",
+  "expires_on": "2027-12-31",
+  "bedroom_occupancy_limit": 6,
+  "zone_occupancy_limit": 6,
+  "paved_parking_limit": 2,
+  "minimum_renter_age": 25,
+  "trash_pickup_weekday": 4,
+  "bear_box_secured": false,
+  "source_id": "fixture-permit"
+}

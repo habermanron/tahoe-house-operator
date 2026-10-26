@@ -1,0 +1,11 @@
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.py[cod]
+data/*.sqlite
+data/*.sqlite-*
+data/vector_store/
+.DS_Store

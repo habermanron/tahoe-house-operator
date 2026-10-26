@@ -1,0 +1,18 @@
+[
+  {
+    "id": "fixture-owner-block-001",
+    "event_type": "owner_block",
+    "start_date": "2026-11-14",
+    "end_date": "2026-11-16",
+    "status": "confirmed",
+    "details": {"label": "Synthetic owner stay"}
+  },
+  {
+    "id": "fixture-clean-001",
+    "event_type": "clean",
+    "start_date": "2026-11-16",
+    "end_date": "2026-11-17",
+    "status": "confirmed",
+    "details": {"label": "Synthetic turnover clean"}
+  }
+]
