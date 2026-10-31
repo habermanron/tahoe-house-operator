@@ -3,102 +3,519 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Tahoe House Operator · MVP</title>
+  <meta name="theme-color" content="#17324d">
+  <title>Tahoe House Operator</title>
   <style>
-    body{font:16px/1.45 system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 18px;color:#24384b}
-    h1,h2{color:#1d4268}label{display:block;margin:12px 0 4px}input{padding:8px;max-width:260px}
-    button{margin-top:16px;padding:9px 15px;background:#1d4268;color:white;border:0;border-radius:5px;cursor:pointer}
-    pre{background:#f3f6f8;padding:14px;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:6px}
-    .note{color:#16834b}.row{display:flex;gap:16px;flex-wrap:wrap}
-    #messages{border:1px solid #ccd6df;border-radius:7px;padding:12px;min-height:150px;max-height:460px;overflow:auto}
-    .message{white-space:pre-wrap;padding:10px;margin:7px 0;border-radius:6px;max-width:88%}
-    .user{background:#eaf2fb;margin-left:auto}.assistant{background:#f2f6f4}.chat-input{width:min(760px,75vw);max-width:none}
+    :root {
+      color-scheme: light;
+      --navy: #17324d;
+      --navy-soft: #eaf0f5;
+      --ink: #253746;
+      --muted: #667784;
+      --line: #dce4e9;
+      --surface: #ffffff;
+      --canvas: #f3f6f7;
+      --green: #237653;
+      --green-bg: #eaf5ee;
+      --amber: #8a5b12;
+      --amber-bg: #fff4df;
+      --red: #a13f3b;
+      --red-bg: #fceceb;
+      --shadow: 0 8px 24px rgba(23, 50, 77, .06);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--canvas); color: var(--ink); font-size: 14px; line-height: 1.5; }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible {
+      outline: 3px solid #8eb4d3; outline-offset: 2px;
+    }
+    .skip-link { position: absolute; left: -999px; top: 8px; z-index: 10; background: white; padding: 10px; }
+    .skip-link:focus { left: 8px; }
+    .app-header { height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 24px;
+      padding: 0 30px; background: var(--navy); color: white; }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 235px; }
+    .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px;
+      background: #d9e9e1; color: var(--navy); font-weight: 800; letter-spacing: -.04em; }
+    .brand-name { font-size: 15px; font-weight: 700; letter-spacing: .01em; }
+    .brand-subtitle { color: #b9c9d6; font-size: 11px; }
+    .header-meta { display: flex; align-items: center; gap: 10px; }
+    .env-pill { color: #d8f0df; border: 1px solid #658573; background: rgba(35,118,83,.22);
+      border-radius: 99px; padding: 5px 10px; font-size: 11px; font-weight: 650; }
+    .header-caption { color: #c3d0da; font-size: 12px; }
+    .app-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: calc(100vh - 68px); }
+    .sidebar { padding: 24px 14px; border-right: 1px solid var(--line); background: #fbfcfd; }
+    .sidebar-label { margin: 3px 11px 10px; color: #778894; font-size: 10px; font-weight: 750; letter-spacing: .09em; text-transform: uppercase; }
+    .nav-list { display: grid; gap: 4px; }
+    .nav-button { width: 100%; border: 0; border-radius: 8px; background: transparent; color: #526575;
+      padding: 10px 11px; text-align: left; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+    .nav-button:hover { background: #f0f4f6; color: var(--navy); }
+    .nav-button[aria-current="page"] { background: var(--navy-soft); color: var(--navy); }
+    .nav-icon { width: 19px; text-align: center; font-size: 15px; }
+    .sidebar-card { margin: 26px 5px 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: white; }
+    .sidebar-card strong { display: block; color: var(--navy); font-size: 12px; }
+    .sidebar-card p { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+    .sidebar-foot { margin: 20px 10px 0; color: #84929c; font-size: 11px; }
+    .main { min-width: 0; padding: 28px clamp(18px, 3vw, 42px) 48px; }
+    .page-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 20px; }
+    .eyebrow { color: var(--green); font-size: 10px; font-weight: 750; letter-spacing: .09em; text-transform: uppercase; }
+    h1 { margin: 3px 0 3px; color: var(--navy); font-size: clamp(22px, 2.4vw, 29px); line-height: 1.2; letter-spacing: -.025em; }
+    .page-description { margin: 5px 0 0; color: var(--muted); max-width: 740px; }
+    .header-button, .button-primary, .button-secondary, .prompt-chip { border-radius: 7px; font-weight: 650; transition: background .15s ease, border-color .15s ease; }
+    .header-button { border: 1px solid #d5dfe6; background: white; color: var(--navy); padding: 8px 11px; white-space: nowrap; }
+    .header-button:hover, .button-secondary:hover { background: #f5f8fa; }
+    .safety-banner { margin: 0 0 18px; padding: 10px 13px; display: flex; gap: 9px; align-items: flex-start;
+      border: 1px solid #d6e5db; border-radius: 8px; color: #466451; background: #f4faf6; font-size: 12px; }
+    .content-grid { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 18px; align-items: start; }
+    .primary-column, .inspector { display: grid; gap: 16px; min-width: 0; }
+    .card { border: 1px solid var(--line); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow); }
+    .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 17px 19px 0; }
+    .card-header h2, .card-header h3 { margin: 0; color: var(--navy); font-size: 15px; line-height: 1.35; }
+    .card-header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .card-body { padding: 16px 19px 19px; }
+    .card-body.compact { padding-top: 12px; }
+    .status-badge { display: inline-flex; align-items: center; gap: 6px; border-radius: 99px; padding: 5px 9px;
+      font-size: 11px; font-weight: 750; white-space: nowrap; }
+    .status-neutral { background: #edf1f4; color: #596c7a; }
+    .status-good { background: var(--green-bg); color: var(--green); }
+    .status-review { background: var(--amber-bg); color: var(--amber); }
+    .status-fail { background: var(--red-bg); color: var(--red); }
+    .messages { min-height: 250px; max-height: 460px; overflow: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+    .welcome { padding: 15px; border: 1px solid #e0e8ed; border-radius: 9px; background: #f8fafb; }
+    .welcome strong { display: block; color: var(--navy); margin-bottom: 4px; }
+    .welcome p { margin: 0; color: #5e707d; font-size: 13px; }
+    .message-row { display: flex; flex-direction: column; max-width: min(90%, 720px); gap: 4px; }
+    .message-row.user { align-self: flex-end; align-items: flex-end; }
+    .message-row.assistant { align-self: flex-start; align-items: flex-start; }
+    .message-label { color: #778894; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    .message-bubble { border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .user .message-bubble { border-color: #d4e1eb; background: #eaf2f8; color: #244662; }
+    .assistant .message-bubble { background: #f8fafb; color: var(--ink); }
+    .message-bubble.error { border-color: #efcecb; background: #fff5f4; color: #873b36; }
+    .suggestion-label { margin: 0 0 8px; color: #71818d; font-size: 11px; font-weight: 650; }
+    .suggestion-list { display: flex; gap: 7px; flex-wrap: wrap; }
+    .prompt-chip { border: 1px solid #d9e2e8; background: white; color: #4d6272; padding: 7px 9px; font-size: 11px; }
+    .prompt-chip:hover { border-color: #9db4c5; background: #f6f9fb; }
+    .chat-form { padding: 0 18px 17px; }
+    .composer { display: flex; gap: 9px; align-items: flex-end; border: 1px solid #cbd7df; border-radius: 9px; padding: 8px; background: white; }
+    .composer:focus-within { border-color: #7899b1; box-shadow: 0 0 0 3px rgba(120,153,177,.14); }
+    .composer textarea { width: 100%; min-height: 43px; max-height: 140px; resize: vertical; border: 0; outline: 0; padding: 9px 8px; color: var(--ink); background: transparent; }
+    .composer textarea:focus-visible { outline: 0; }
+    .button-primary { border: 1px solid var(--navy); background: var(--navy); color: white; padding: 10px 15px; }
+    .button-primary:hover { background: #244a6c; }
+    .button-primary:disabled { cursor: wait; opacity: .65; }
+    .button-secondary { border: 1px solid #d5dfe6; background: white; color: #425a6c; padding: 8px 10px; }
+    .form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; }
+    .field { display: grid; gap: 5px; color: #516473; font-size: 12px; font-weight: 650; }
+    .field input { min-width: 0; width: 100%; border: 1px solid #ccd7df; border-radius: 7px; padding: 9px 10px; color: var(--ink); background: #fff; }
+    .field input:focus { border-color: #7899b1; }
+    .form-help { color: var(--muted); font-size: 11px; }
+    details { border-top: 1px solid #edf0f2; margin-top: 14px; padding-top: 12px; }
+    summary { cursor: pointer; color: #4c6272; font-size: 12px; font-weight: 650; }
+    .form-actions { display: flex; align-items: center; gap: 12px; margin-top: 15px; }
+    .form-status { color: var(--muted); font-size: 12px; }
+    .inspector { position: sticky; top: 18px; }
+    .metric { padding: 14px 16px; border-bottom: 1px solid #edf0f2; }
+    .metric:last-child { border-bottom: 0; }
+    .metric-label { color: #7b8a94; font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .metric-value { margin-top: 4px; color: var(--navy); font-size: 14px; font-weight: 700; }
+    .metric-detail { margin-top: 3px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+    .evidence-list, .event-list, .source-list, .check-list { display: grid; gap: 9px; }
+    .evidence-item, .event-item, .source-item, .check-item { border: 1px solid #e3e9ed; border-radius: 8px; padding: 11px; background: #fbfcfd; }
+    .item-title { color: var(--navy); font-size: 12px; font-weight: 700; }
+    .item-meta { margin-top: 3px; color: #758590; font-size: 10px; }
+    .item-text { margin-top: 7px; color: #4b5d6b; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .citation { display: inline-flex; margin: 7px 5px 0 0; padding: 3px 7px; border-radius: 5px; background: #edf3f7; color: #3c5e78; font-size: 10px; font-weight: 650; }
+    .tool-list { display: grid; gap: 8px; }
+    .tool-item { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; padding: 9px 0; border-bottom: 1px solid #eef1f3; }
+    .tool-item:last-child { border-bottom: 0; }
+    .tool-name { color: #40596c; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+    pre { max-height: 320px; overflow: auto; margin: 10px 0 0; padding: 12px; border-radius: 7px; background: #f3f6f8; color: #334b5e; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .empty-state { padding: 17px 12px; color: #82909a; text-align: center; font-size: 12px; }
+    .view[hidden] { display: none; }
+    .view-header { margin: 0 0 16px; }
+    .view-header h2 { margin: 0; color: var(--navy); font-size: 18px; }
+    .view-header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .source-search { display: flex; gap: 9px; }
+    .source-search input { flex: 1; min-width: 0; border: 1px solid #ccd7df; border-radius: 7px; padding: 10px; }
+    .source-search .button-primary { align-self: stretch; }
+    .source-meta { color: #778894; font-size: 10px; }
+    .source-text { margin-top: 8px; color: #394d5c; font-size: 12px; line-height: 1.55; }
+    @media (max-width: 1050px) {
+      .content-grid { grid-template-columns: minmax(0, 1fr) 270px; }
+      .app-layout { grid-template-columns: 190px minmax(0, 1fr); }
+      .app-header { padding: 0 20px; }
+    }
+    @media (max-width: 800px) {
+      .app-layout { display: block; }
+      .sidebar { padding: 8px 14px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .sidebar-label, .sidebar-card, .sidebar-foot { display: none; }
+      .nav-list { display: flex; overflow-x: auto; }
+      .nav-button { width: auto; white-space: nowrap; }
+      .main { padding: 22px 16px 36px; }
+      .content-grid { grid-template-columns: 1fr; }
+      .inspector { position: static; }
+    }
+    @media (max-width: 560px) {
+      .app-header { height: 60px; padding: 0 14px; }
+      .header-caption { display: none; }
+      .brand { min-width: 0; }
+      .form-grid { grid-template-columns: 1fr; }
+      .page-heading { flex-direction: column; }
+      .message-row { max-width: 96%; }
+      .source-search { flex-direction: column; }
+      .composer { align-items: stretch; flex-direction: column; }
+      .composer .button-primary { align-self: flex-end; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
   </style>
 </head>
 <body>
-  <h1>Tahoe House Operator</h1>
-  <p class="note">MVP · Synthetic fixture data · No messages are sent and no calendar write is made without approval.</p>
-  <p class="note">Chat text and recent turns are sent to your configured model gateway for request parsing. Avoid real guest or financial data in this MVP.</p>
-  <h2>Ask the property assistant</h2>
-  <p>Ask in plain language about occupancy, date availability, a proposed stay, trash, parking, or stored house rules. Pricing, turnover, guest messaging, and finance are not implemented in this MVP.</p>
-  <div id="messages" aria-live="polite"></div>
-  <form id="chat-form">
-    <label for="chat-message">Your question</label>
-    <input id="chat-message" name="message" class="chat-input" maxlength="4000" placeholder="Can I stay Nov 14–15, and is the calendar clear?" required>
-    <button id="chat-send" type="submit">Ask</button>
-  </form>
-  <details><summary>Last chat tool trace</summary><pre id="chat-trace">Tool calls and citations will appear here.</pre></details>
-  <h2>Check a stay and calendar</h2>
-  <form id="run-form">
-    <label>Request <input name="prompt" value="Check a Saturday stay and storm/trash rules" size="48"></label>
-    <div class="row">
-      <label>Stay start <input name="start_date" type="date" value="2026-11-14"></label>
-      <label>Stay end <input name="end_date" type="date" value="2026-11-15"></label>
-      <label>Trash check date <input name="trash_date" type="date" value="2026-11-13"></label>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="app-header">
+    <div class="brand" aria-label="Tahoe House Operator">
+      <div class="brand-mark" aria-hidden="true">TH</div>
+      <div><div class="brand-name">Tahoe House Operator</div><div class="brand-subtitle">Property operations workspace</div></div>
     </div>
-    <div class="row">
-      <label>Guests <input name="guest_count" type="number" min="1" value="2"></label>
-      <label>Renter age <input name="renter_age" type="number" min="18" value="35"></label>
-      <label>Vehicles <input name="vehicles" type="number" min="0" value="1"></label>
-    </div>
-    <details>
-      <summary>Optional operator correction (used only if a check fails)</summary>
-      <div class="row">
-        <label>Corrected start <input name="revision_start" type="date"></label>
-        <label>Corrected end <input name="revision_end" type="date"></label>
-      </div>
-    </details>
-    <button type="submit">Run checks</button>
-  </form>
-  <h2>Run trace</h2><pre id="result">Submit a request to see the trace.</pre>
-  <h2>Calendar view</h2><pre id="calendar">Calendar events will appear with the run trace.</pre>
-  <h2>Corpus retrieval inspector</h2>
-  <form id="corpus-form"><label>Search local rules <input name="query" value="bear box storm pickup" size="42"></label><button type="submit">Search corpus</button></form>
-  <pre id="corpus-result">Search results include passages and source metadata.</pre>
+    <div class="header-meta"><span class="header-caption">Human-guided · evidence-backed</span><span class="env-pill">SYNTHETIC DEMO</span></div>
+  </header>
+
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="sidebar-label">Workspace</div>
+      <nav class="nav-list" aria-label="Main navigation">
+        <button class="nav-button" data-view-target="assistant-view" aria-current="page"><span class="nav-icon" aria-hidden="true">✦</span>Assistant</button>
+        <button class="nav-button" data-view-target="calendar-view"><span class="nav-icon" aria-hidden="true">▦</span>Calendar checks</button>
+        <button class="nav-button" data-view-target="sources-view"><span class="nav-icon" aria-hidden="true">⌕</span>Rules &amp; sources</button>
+      </nav>
+      <div class="sidebar-card"><strong>MVP capabilities</strong><p>Occupancy, availability, stay checks, trash, parking, and stored house rules.</p></div>
+      <p class="sidebar-foot">Messages stay drafts. Calendar writes require approval.</p>
+    </aside>
+
+    <main class="main" id="main-content">
+      <section class="view" id="assistant-view">
+        <div class="page-heading">
+          <div><div class="eyebrow">Operator workspace</div><h1>Assistant</h1><p class="page-description">Ask a property question in plain language. Results are grounded in House MCP tools and the local rules corpus.</p></div>
+          <button class="header-button" id="new-chat" type="button">＋ New conversation</button>
+        </div>
+        <div class="safety-banner"><span aria-hidden="true">ⓘ</span><span>Chat text is sent to your configured model gateway for request parsing. This is synthetic demo data—do not enter real guest or financial information.</span></div>
+        <div class="content-grid">
+          <div class="primary-column">
+            <section class="card" aria-label="Property assistant chat">
+              <div class="card-header"><div><h2>Ask about your property</h2><p>Occupancy · dates · trash · parking · house rules</p></div><span class="status-badge status-neutral">No actions sent</span></div>
+              <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions">
+                <div class="welcome" id="welcome-message"><strong>How can I help?</strong><p>I can check occupancy, calendar availability, a proposed stay, trash and parking rules, or search the stored house documents. I’ll ask if key details are missing.</p></div>
+              </div>
+              <div class="chat-form">
+                <p class="suggestion-label">Try asking</p>
+                <div class="suggestion-list">
+                  <button class="prompt-chip" type="button" data-prompt="What is the occupancy limit?">Occupancy limit</button>
+                  <button class="prompt-chip" type="button" data-prompt="Is November 14 to 15 available?">Check dates</button>
+                  <button class="prompt-chip" type="button" data-prompt="What are the bear box and trash rules?">Trash rules</button>
+                </div>
+                <form id="chat-form" style="margin-top:13px">
+                  <label class="field" for="chat-message">Your question</label>
+                  <div class="composer"><textarea id="chat-message" name="message" rows="2" maxlength="4000" placeholder="For example: Can I stay Saturday with two guests and one vehicle?" required></textarea><button class="button-primary" id="chat-send" type="submit">Ask assistant</button></div>
+                  <div class="form-help" style="margin:7px 2px 0">The assistant checks facts with tools; it does not make bookings or send messages.</div>
+                </form>
+              </div>
+            </section>
+          </div>
+
+          <aside class="inspector" aria-label="Evidence and activity">
+            <section class="card">
+              <div class="card-header"><div><h2>Decision summary</h2><p>Latest assistant response</p></div></div>
+              <div class="metric"><div class="metric-label">Review status</div><div class="metric-value"><span id="chat-status" class="status-badge status-neutral">Waiting for a question</span></div></div>
+              <div class="metric"><div class="metric-label">Cited sources</div><div id="citation-list" class="metric-detail">Sources will appear with a response.</div></div>
+              <div class="metric"><div class="metric-label">Tools used</div><div id="tool-summary" class="metric-detail">No tools called yet.</div></div>
+            </section>
+            <section class="card">
+              <div class="card-header"><div><h3>Evidence &amp; trace</h3><p>Inspect what informed the answer</p></div></div>
+              <div class="card-body compact"><div id="evidence-list" class="tool-list"><div class="empty-state">Tool results and citations will be shown here.</div></div><details><summary>Raw trace details</summary><pre id="chat-trace">No trace yet.</pre></details></div>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="calendar-view" hidden>
+        <div class="page-heading"><div><div class="eyebrow">Deterministic checks</div><h1>Calendar checks</h1><p class="page-description">Review a stay against permit, parking, trash, and calendar fixtures. This form does not create a booking.</p></div></div>
+        <div class="content-grid">
+          <div class="primary-column">
+            <section class="card"><div class="card-header"><div><h2>Check a proposed stay</h2><p>All dates use a checkout-exclusive range.</p></div></div>
+              <div class="card-body">
+                <form id="run-form">
+                  <label class="field">Request summary<input name="prompt" value="Check this stay against calendar and rules" maxlength="4000"></label>
+                  <div class="form-grid" style="margin-top:13px">
+                    <label class="field">Stay starts<input name="start_date" type="date" value="2026-11-14" required></label>
+                    <label class="field">Stay ends / checkout<input name="end_date" type="date" value="2026-11-15" required></label>
+                    <label class="field">Trash check date<input name="trash_date" type="date" value="2026-11-13"></label>
+                  </div>
+                  <div class="form-grid" style="margin-top:13px">
+                    <label class="field">Guest count<input name="guest_count" type="number" min="1" value="2" required></label>
+                    <label class="field">Renter age<input name="renter_age" type="number" min="18" value="35" required></label>
+                    <label class="field">Vehicles<input name="vehicles" type="number" min="0" value="1" required></label>
+                  </div>
+                  <details><summary>Optional operator revision (only used after a failed check)</summary><div class="form-grid" style="margin-top:12px"><label class="field">Revised start<input name="revision_start" type="date"></label><label class="field">Revised checkout<input name="revision_end" type="date"></label></div></details>
+                  <div class="form-actions"><button id="run-checks" class="button-primary" type="submit">Run checks</button><span id="run-status" class="form-status" role="status"></span></div>
+                </form>
+              </div>
+            </section>
+            <section class="card"><div class="card-header"><div><h2>Check results</h2><p>Rule checks and conflicts from the latest run</p></div><span id="run-badge" class="status-badge status-neutral">Not run</span></div><div class="card-body"><div id="check-list" class="check-list"><div class="empty-state">Run a check to see permit, trash, parking, and calendar results.</div></div></div></section>
+          </div>
+          <aside class="inspector"><section class="card"><div class="card-header"><div><h2>Calendar events</h2><p>Events in the checked date range</p></div></div><div class="card-body"><div id="calendar-events" class="event-list"><div class="empty-state">No date range checked yet.</div></div></div></section><section class="card"><div class="card-header"><div><h3>Run details</h3><p>Critic and tool-call trace</p></div></div><div class="card-body compact"><div id="run-critic" class="form-help">No run yet.</div><details><summary>Raw tool trace</summary><pre id="run-trace">No trace yet.</pre></details></div></section></aside>
+        </div>
+      </section>
+
+      <section class="view" id="sources-view" hidden>
+        <div class="page-heading"><div><div class="eyebrow">Grounded answers</div><h1>Rules &amp; sources</h1><p class="page-description">Search the local synthetic corpus and inspect the source passages, version, and effective date returned to the assistant.</p></div></div>
+        <section class="card"><div class="card-header"><div><h2>Search property documents</h2><p>Retrieved passages are evidence, not executable instructions.</p></div></div><div class="card-body"><form id="corpus-form"><div class="source-search"><input name="query" value="bear box storm pickup" aria-label="Search local rules" placeholder="Search occupancy, trash, parking…" required><button id="corpus-search" class="button-primary" type="submit">Search sources</button></div></form><div id="corpus-status" class="form-status" role="status" style="margin-top:10px"></div><div id="source-list" class="source-list" style="margin-top:15px"><div class="empty-state">Search to inspect retrieved rule passages.</div></div></div></section>
+      </section>
+    </main>
+  </div>
+
   <script>
-    const messages=document.querySelector('#messages');
-    let chatSessionId=localStorage.getItem('tahoe-chat-session')||null;
-    function addMessage(role,text){const item=document.createElement('div');item.className='message '+role;item.textContent=text;messages.appendChild(item);messages.scrollTop=messages.scrollHeight;}
-    document.querySelector('#chat-form').addEventListener('submit',async event=>{
-      event.preventDefault();
-      const input=document.querySelector('#chat-message');const message=input.value.trim();if(!message)return;
-      addMessage('user',message);input.value='';
-      const button=document.querySelector('#chat-send');button.disabled=true;button.textContent='Working…';
-      try{
-        const response=await fetch('/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message,session_id:chatSessionId})});
-        const data=await response.json();
-        if(!response.ok)throw new Error(data.detail||'Chat request failed');
-        chatSessionId=data.session_id;localStorage.setItem('tahoe-chat-session',chatSessionId);
-        addMessage('assistant',data.answer);
-        document.querySelector('#chat-trace').textContent=JSON.stringify({tasks:data.tasks,critic:data.critic,citations:data.citations,tool_trace:data.tool_trace},null,2);
-      }catch(error){addMessage('assistant','I could not complete that request: '+String(error))}
-      finally{button.disabled=false;button.textContent='Ask';input.focus()}
+    const messages = document.querySelector('#messages');
+    let chatSessionId = localStorage.getItem('tahoe-chat-session') || null;
+
+    function setStatus(element, label, kind = 'neutral') {
+      element.textContent = label;
+      element.className = `status-badge status-${kind}`;
+    }
+
+    function appendMessage(role, text, isError = false) {
+      document.querySelector('#welcome-message')?.remove();
+      const row = document.createElement('div');
+      row.className = `message-row ${role}`;
+      const label = document.createElement('span');
+      label.className = 'message-label';
+      label.textContent = role === 'user' ? 'You' : 'Tahoe assistant';
+      const bubble = document.createElement('div');
+      bubble.className = `message-bubble${isError ? ' error' : ''}`;
+      bubble.textContent = text;
+      row.append(label, bubble);
+      messages.appendChild(row);
+      messages.scrollTop = messages.scrollHeight;
+      return row;
+    }
+
+    function statusKind(status) {
+      if (status === 'pass' || status === 'ready_for_operator') return 'good';
+      if (status === 'fail') return 'fail';
+      if (status === 'needs_operator_review') return 'review';
+      return 'neutral';
+    }
+
+    function toolStatus(result) {
+      const status = result?.status;
+      const kind = status === 'pass' || status === 'ok' || status === 'logged' ? 'good' :
+        status === 'fail' || status === 'no_match' || status === 'unavailable' ? 'review' : 'neutral';
+      return { label: status ? status.replaceAll('_', ' ') : 'result', kind };
+    }
+
+    function renderChatEvidence(data) {
+      const critic = data.critic || {};
+      const statusLabel = critic.status === 'pass' ? 'Checks passed' :
+        critic.status === 'needs_operator_review' ? 'Needs operator review' : 'Answer ready';
+      setStatus(document.querySelector('#chat-status'), statusLabel, statusKind(critic.status));
+
+      const citations = data.citations || [];
+      const citationsTarget = document.querySelector('#citation-list');
+      citationsTarget.replaceChildren();
+      if (!citations.length) citationsTarget.textContent = 'No corpus citations returned.';
+      citations.forEach(source => {
+        const chip = document.createElement('span');
+        chip.className = 'citation';
+        chip.textContent = `${source.title || source.source_id} · ${source.version || 'tool source'}`;
+        citationsTarget.appendChild(chip);
+      });
+
+      const trace = data.tool_trace || [];
+      document.querySelector('#tool-summary').textContent = trace.length ?
+        `${trace.length} tool call${trace.length === 1 ? '' : 's'} · ${(data.tasks || []).map(task => task.kind).join(', ')}` :
+        'No tools were needed for this response.';
+      document.querySelector('#chat-trace').textContent = JSON.stringify({
+        tasks: data.tasks, critic: data.critic, citations: data.citations, tool_trace: data.tool_trace
+      }, null, 2);
+
+      const evidence = document.querySelector('#evidence-list');
+      evidence.replaceChildren();
+      if (!trace.length) {
+        evidence.innerHTML = '<div class="empty-state">No tool calls were needed.</div>';
+        return;
+      }
+      trace.forEach(call => {
+        const item = document.createElement('div');
+        item.className = 'tool-item';
+        const badge = document.createElement('span');
+        const status = toolStatus(call.result);
+        badge.className = `status-badge status-${status.kind}`;
+        badge.textContent = status.label;
+        const detail = document.createElement('div');
+        const name = document.createElement('div');
+        name.className = 'tool-name';
+        name.textContent = call.tool;
+        const summary = document.createElement('div');
+        summary.className = 'item-meta';
+        summary.textContent = JSON.stringify(call.arguments || {});
+        detail.append(name, summary);
+        item.append(badge, detail);
+        evidence.appendChild(item);
+      });
+    }
+
+    document.querySelectorAll('[data-view-target]').forEach(button => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.view').forEach(view => { view.hidden = view.id !== button.dataset.viewTarget; });
+        document.querySelectorAll('[data-view-target]').forEach(nav => nav.removeAttribute('aria-current'));
+        button.setAttribute('aria-current', 'page');
+      });
     });
-    const form=document.querySelector('#run-form');
-    form.addEventListener('submit',async event=>{
-      event.preventDefault();
-      const raw=Object.fromEntries(new FormData(form));
-      for(const key of ['guest_count','renter_age','vehicles']) raw[key]=Number(raw[key]);
-      const revision={};
-      if(raw.revision_start) revision.start_date=raw.revision_start;
-      if(raw.revision_end) revision.end_date=raw.revision_end;
-      delete raw.revision_start;delete raw.revision_end;
-      if(Object.keys(revision).length) raw.operator_revision=revision;
-      document.querySelector('#result').textContent='Running…';
-      try{
-        const response=await fetch('/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(raw)});
-        const data=await response.json();
-        document.querySelector('#result').textContent=JSON.stringify(data,null,2);
-        const calendarSlice=(data.slices||[]).find(slice=>slice.name==='calendar');
-        document.querySelector('#calendar').textContent=JSON.stringify(calendarSlice||{},null,2);
-      }catch(error){document.querySelector('#result').textContent=String(error)}
+
+    document.querySelectorAll('[data-prompt]').forEach(button => {
+      button.addEventListener('click', () => {
+        const input = document.querySelector('#chat-message');
+        input.value = button.dataset.prompt;
+        input.focus();
+      });
     });
-    document.querySelector('#corpus-form').addEventListener('submit',async event=>{
+
+    document.querySelector('#new-chat').addEventListener('click', () => {
+      chatSessionId = null;
+      localStorage.removeItem('tahoe-chat-session');
+      messages.replaceChildren();
+      const welcome = document.createElement('div');
+      welcome.className = 'welcome';
+      welcome.id = 'welcome-message';
+      welcome.innerHTML = '<strong>New conversation</strong><p>Ask about occupancy, dates, trash, parking, or a stored house rule.</p>';
+      messages.appendChild(welcome);
+      setStatus(document.querySelector('#chat-status'), 'Waiting for a question');
+      document.querySelector('#citation-list').textContent = 'Sources will appear with a response.';
+      document.querySelector('#tool-summary').textContent = 'No tools called yet.';
+      document.querySelector('#evidence-list').innerHTML = '<div class="empty-state">Tool results and citations will be shown here.</div>';
+      document.querySelector('#chat-trace').textContent = 'No trace yet.';
+      document.querySelector('#chat-message').focus();
+    });
+
+    document.querySelector('#chat-form').addEventListener('submit', async event => {
       event.preventDefault();
-      const query=new FormData(event.currentTarget).get('query');
-      const target=document.querySelector('#corpus-result');target.textContent='Searching…';
-      try{const response=await fetch('/corpus/search?query='+encodeURIComponent(query));target.textContent=JSON.stringify(await response.json(),null,2)}
-      catch(error){target.textContent=String(error)}
+      const input = document.querySelector('#chat-message');
+      const message = input.value.trim();
+      if (!message) return;
+      appendMessage('user', message);
+      input.value = '';
+      const button = document.querySelector('#chat-send');
+      button.disabled = true;
+      button.textContent = 'Checking…';
+      const pending = appendMessage('assistant', 'Checking the relevant tools and sources…');
+      try {
+        const response = await fetch('/chat', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ message, session_id: chatSessionId })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Chat request failed');
+        chatSessionId = data.session_id;
+        localStorage.setItem('tahoe-chat-session', chatSessionId);
+        pending.querySelector('.message-bubble').textContent = data.answer;
+        renderChatEvidence(data);
+      } catch (error) {
+        pending.querySelector('.message-bubble').textContent = `I could not complete that request: ${error}`;
+        pending.querySelector('.message-bubble').classList.add('error');
+        setStatus(document.querySelector('#chat-status'), 'Request failed', 'fail');
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Ask assistant';
+        input.focus();
+      }
+    });
+
+    document.querySelector('#run-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const raw = Object.fromEntries(new FormData(form));
+      for (const key of ['guest_count', 'renter_age', 'vehicles']) raw[key] = Number(raw[key]);
+      const revision = {};
+      if (raw.revision_start) revision.start_date = raw.revision_start;
+      if (raw.revision_end) revision.end_date = raw.revision_end;
+      delete raw.revision_start; delete raw.revision_end;
+      if (Object.keys(revision).length) raw.operator_revision = revision;
+      const button = document.querySelector('#run-checks');
+      button.disabled = true; button.textContent = 'Checking…';
+      document.querySelector('#run-status').textContent = 'Consulting compliance and calendar tools…';
+      try {
+        const response = await fetch('/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(raw) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Run failed');
+        const critic = data.critic || {};
+        const label = critic.status === 'pass' ? 'Checks passed' : 'Needs review';
+        setStatus(document.querySelector('#run-badge'), label, statusKind(critic.status));
+        document.querySelector('#run-status').textContent = `Run ${data.run_id} · ${data.rounds} round(s)`;
+        document.querySelector('#run-critic').textContent = critic.reasons?.length ?
+          `Critic findings: ${critic.reasons.join(', ')}` : 'No hard-rule failures reported.';
+        document.querySelector('#run-trace').textContent = JSON.stringify(data.tool_trace, null, 2);
+        renderRunSlices(data.slices || []);
+      } catch (error) {
+        setStatus(document.querySelector('#run-badge'), 'Request failed', 'fail');
+        document.querySelector('#run-status').textContent = String(error);
+      } finally {
+        button.disabled = false; button.textContent = 'Run checks';
+      }
+    });
+
+    function renderRunSlices(slices) {
+      const list = document.querySelector('#check-list');
+      const events = document.querySelector('#calendar-events');
+      list.replaceChildren(); events.replaceChildren();
+      const checks = slices.flatMap(slice => (slice.results || []).map(result => ({ slice: slice.name, result })));
+      if (!checks.length) list.innerHTML = '<div class="empty-state">No checks returned.</div>';
+      checks.forEach(({ slice, result }) => {
+        if (result.tool === 'get_timeline') return;
+        const item = document.createElement('div'); item.className = 'check-item';
+        const heading = document.createElement('div'); heading.className = 'item-title'; heading.textContent = result.tool || slice;
+        const status = toolStatus(result); const badge = document.createElement('span');
+        badge.className = `status-badge status-${status.kind}`; badge.textContent = status.label;
+        const detail = document.createElement('div'); detail.className = 'item-text';
+        detail.textContent = result.reasons?.length ? result.reasons.join(' · ') :
+          result.action || result.date || (result.limit ? `Limit: ${result.limit}` : 'Check completed.');
+        item.append(heading, badge, detail); list.appendChild(item);
+      });
+      const calendarSlice = slices.find(slice => slice.name === 'calendar');
+      const timeline = (calendarSlice?.results || []).flatMap(result => result.events || []);
+      if (!timeline.length) events.innerHTML = '<div class="empty-state">No events in the checked range.</div>';
+      timeline.forEach(event => {
+        const item = document.createElement('div'); item.className = 'event-item';
+        const title = document.createElement('div'); title.className = 'item-title'; title.textContent = event.event_type.replaceAll('_', ' ');
+        const dates = document.createElement('div'); dates.className = 'item-meta'; dates.textContent = `${event.start_date} → ${event.end_date} · ${event.status}`;
+        const detail = document.createElement('div'); detail.className = 'item-text'; detail.textContent = event.details?.label || event.id;
+        item.append(title, dates, detail); events.appendChild(item);
+      });
+    }
+
+    document.querySelector('#corpus-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const query = new FormData(event.currentTarget).get('query');
+      const button = document.querySelector('#corpus-search');
+      const status = document.querySelector('#corpus-status');
+      const list = document.querySelector('#source-list');
+      button.disabled = true; button.textContent = 'Searching…'; status.textContent = 'Searching the local corpus…';
+      try {
+        const response = await fetch(`/corpus/search?query=${encodeURIComponent(query)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Corpus search failed');
+        list.replaceChildren();
+        status.textContent = `${data.chunks?.length || 0} passage(s) · ${data.mode || 'retrieval'}`;
+        if (!data.chunks?.length) list.innerHTML = '<div class="empty-state">No supporting passage found. Check the source documents or escalate.</div>';
+        (data.chunks || []).forEach(chunk => {
+          const item = document.createElement('article'); item.className = 'source-item';
+          const title = document.createElement('div'); title.className = 'item-title'; title.textContent = chunk.title || chunk.source_id || 'Source';
+          const meta = document.createElement('div'); meta.className = 'source-meta';
+          meta.textContent = `${chunk.source_id || 'unknown source'} · ${chunk.version || 'no version'} · effective ${chunk.effective_date || 'date unknown'}`;
+          const text = document.createElement('div'); text.className = 'source-text'; text.textContent = chunk.text || '';
+          item.append(title, meta, text); list.appendChild(item);
+        });
+      } catch (error) { status.textContent = String(error); list.replaceChildren(); }
+      finally { button.disabled = false; button.textContent = 'Search sources'; }
     });
   </script>
 </body>
