@@ -332,6 +332,7 @@
 
       const trace = data.tool_trace || [];
       document.querySelector('#tool-summary').textContent = trace.length ?
+        `${[...new Set(trace.map(call => call.specialist))].filter(Boolean).join(' · ')} · ` +
         `${trace.length} tool call${trace.length === 1 ? '' : 's'} · ${(data.tasks || []).map(task => task.kind).join(', ')}` :
         'No tools were needed for this response.';
       document.querySelector('#chat-trace').textContent = JSON.stringify({
@@ -357,7 +358,7 @@
         name.textContent = call.tool;
         const summary = document.createElement('div');
         summary.className = 'item-meta';
-        summary.textContent = JSON.stringify(call.arguments || {});
+        summary.textContent = `${call.specialist || 'specialist'} · ${JSON.stringify(call.arguments || {})}`;
         detail.append(name, summary);
         item.append(badge, detail);
         evidence.appendChild(item);
