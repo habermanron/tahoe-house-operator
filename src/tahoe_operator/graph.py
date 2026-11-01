@@ -1,9 +1,13 @@
-from datetime import date
-from typing import Any, TypedDict
+import operator
+from typing import Annotated, Any, TypedDict
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 
+from tahoe_operator.agents.calendar import CalendarSpecialist
+from tahoe_operator.agents.compliance import ComplianceSpecialist
+from tahoe_operator.agents.knowledge import KnowledgeSpecialist
 from tahoe_operator.house_client import HouseMCPClient
 from tahoe_operator.schemas import RunRequest
 
@@ -13,107 +17,83 @@ class OperatorState(TypedDict, total=False):
     request: dict[str, Any]
     round: int
     revision_applied: bool
+    selected_slices: list[str]
+    compliance_result: dict[str, Any]
+    calendar_result: dict[str, Any]
+    knowledge_result: dict[str, Any]
     slices: list[dict[str, Any]]
     failed_slices: list[str]
-    tool_trace: list[dict[str, Any]]
+    tool_trace: Annotated[list[dict[str, Any]], operator.add]
     critic: dict[str, Any]
     status: str
     report_id: str
 
 
 def build_graph(client: HouseMCPClient | None = None):
+    """Build the supervisor graph with parallel, tool-scoped domain specialists."""
     house = client or HouseMCPClient()
+    compliance_agent = ComplianceSpecialist(house)
+    calendar_agent = CalendarSpecialist(house)
+    knowledge_agent = KnowledgeSpecialist(house)
 
-    async def intake(state: OperatorState) -> dict[str, Any]:
+    async def supervisor(state: OperatorState) -> dict[str, Any]:
         request = dict(state["request"])
-        selected = ["compliance", "calendar"]
+        selected = []
+        if (request.get("start_date") and request.get("end_date")) or request.get("trash_date"):
+            selected.extend(["compliance", "calendar"])
+        if request.get("prompt"):
+            selected.append("knowledge")
         return {
             "run_id": state.get("run_id") or str(uuid4()),
             "round": state.get("round", 1),
             "request": request,
-            "slices": [{"name": name, "status": "selected"} for name in selected],
-            "failed_slices": [],
-            "tool_trace": list(state.get("tool_trace", [])),
+            "selected_slices": selected,
+            "compliance_result": {"name": "compliance", "status": "skipped", "results": []},
+            "calendar_result": {"name": "calendar", "status": "skipped", "results": []},
+            "knowledge_result": {"name": "knowledge", "status": "skipped", "results": []},
         }
 
-    async def compliance_node(state: OperatorState) -> dict[str, Any]:
-        request = state["request"]
-        results: list[dict[str, Any]] = []
-        trace: list[dict[str, Any]] = []
+    async def compliance_specialist(state: OperatorState) -> dict[str, Any]:
+        result, trace = await compliance_agent.inspect_request(state["request"])
+        return {"compliance_result": result, "tool_trace": trace}
 
-        async def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
-            output = await house.call_tool(name, args)
-            trace.append({"tool": name, "arguments": args, "result": output})
-            results.append({"tool": name, **output})
-            return output
+    async def calendar_specialist(state: OperatorState) -> dict[str, Any]:
+        result, trace = await calendar_agent.inspect_request(state["request"])
+        return {"calendar_result": result, "tool_trace": trace}
 
-        if request.get("start_date") and request.get("end_date"):
-            await call(
-                "check_stay",
-                {
-                    "start_date": request["start_date"],
-                    "end_date": request["end_date"],
-                    "guest_count": request["guest_count"],
-                    "renter_age": request.get("renter_age"),
-                    "vehicles": request["vehicles"],
-                },
-            )
-            await call(
-                "check_parking",
-                {"check_date": request["start_date"], "vehicles": request["vehicles"]},
-            )
-        if request.get("trash_date"):
-            await call("check_trash", {"check_date": request["trash_date"]})
-        if request.get("prompt"):
-            await call("search_corpus", {"query": request["prompt"], "limit": 3})
-
-        current = [item for item in state.get("slices", []) if item.get("name") != "compliance"]
-        current.append({"name": "compliance", "status": "complete", "results": results})
-        return {"slices": current, "tool_trace": state.get("tool_trace", []) + trace}
-
-    async def calendar_node(state: OperatorState) -> dict[str, Any]:
-        request = state["request"]
-        start = request.get("start_date") or request.get("trash_date")
-        end = request.get("end_date")
-        if not start:
-            today = date.today().isoformat()
-            start, end = today, today
-        if not end:
-            end = start
-        # Make a one-day query non-empty; calendar ranges are half-open.
-        if end == start:
-            end = date.fromordinal(date.fromisoformat(start).toordinal() + 1).isoformat()
-        args = {"start_date": start, "end_date": end}
-        timeline = await house.call_tool("get_timeline", args)
-        trace = {"tool": "get_timeline", "arguments": args, "result": timeline}
-        events = timeline.get("events", [])
-        conflicts = [
-            event
-            for event in events
-            if event.get("event_type") in {"owner_block", "booking", "hold", "maintenance"}
-        ]
-        result = {
-            "status": "fail" if conflicts else "pass",
-            "events": events,
-            "conflicts": conflicts,
-        }
-        current = [item for item in state.get("slices", []) if item.get("name") != "calendar"]
-        current.append({"name": "calendar", "status": "complete", "results": [result]})
-        return {"slices": current, "tool_trace": state.get("tool_trace", []) + [trace]}
+    async def knowledge_specialist(state: OperatorState) -> dict[str, Any]:
+        result, trace = await knowledge_agent.inspect_request(state["request"])
+        return {"knowledge_result": result, "tool_trace": trace}
 
     async def critic(state: OperatorState) -> dict[str, Any]:
-        failed = []
-        reasons = []
-        for item in state.get("slices", []):
-            if item.get("name") not in {"compliance", "calendar"}:
-                continue
+        slices = [
+            state.get("compliance_result", {}),
+            state.get("calendar_result", {}),
+            state.get("knowledge_result", {}),
+        ]
+        slices = [item for item in slices if item.get("status") != "skipped"]
+        failed: list[str] = []
+        reasons: list[str] = []
+        for item in slices:
             for result in item.get("results", []):
-                if result.get("status") == "fail":
-                    failed.append(item["name"])
-                    reasons.extend(result.get("reasons", []))
-                    if item["name"] == "calendar" and result.get("conflicts"):
-                        reasons.append("requested_dates_overlap_calendar_event")
-                if result.get("tool") == "search_corpus" and result.get("status") != "ok":
+                kind = result.get("kind")
+                if kind == "stay_check":
+                    stay, parking = result.get("stay", {}), result.get("parking", {})
+                    if stay.get("status") != "pass":
+                        failed.append("compliance")
+                        reasons.extend(stay.get("reasons", []))
+                    if parking.get("status") != "pass":
+                        failed.append("compliance")
+                        reasons.append("parking_check_failed")
+                elif kind in {"trash_check", "parking_check"}:
+                    tool_result = result.get("result", {})
+                    if tool_result.get("status") == "fail":
+                        failed.append("compliance")
+                        reasons.extend(tool_result.get("reasons", []))
+                elif kind in {"availability", "stay_calendar"} and result.get("conflicts"):
+                    failed.append("calendar")
+                    reasons.append("requested_dates_overlap_calendar_event")
+                if kind == "rules_search" and not result.get("result", {}).get("chunks"):
                     failed.append("knowledge")
                     reasons.append("required_corpus_evidence_not_found")
         failed = list(dict.fromkeys(failed))
@@ -122,8 +102,11 @@ def build_graph(client: HouseMCPClient | None = None):
             "failed_slices": failed,
             "reasons": list(dict.fromkeys(reasons)),
             "round": state.get("round", 1),
+            "tools_called": False,
+            "specialists_reviewed": [item["name"] for item in slices],
         }
         return {
+            "slices": slices,
             "critic": verdict,
             "failed_slices": failed,
             "status": "needs_operator_review" if failed else "ready_for_operator",
@@ -137,23 +120,39 @@ def build_graph(client: HouseMCPClient | None = None):
             "request": request,
             "round": state.get("round", 1) + 1,
             "revision_applied": True,
-            "slices": [],
         }
 
     async def reporter(state: OperatorState) -> dict[str, Any]:
         return {"report_id": str(uuid4())}
 
     builder = StateGraph(OperatorState)
-    builder.add_node("intake", intake)
-    builder.add_node("compliance", compliance_node)
-    builder.add_node("calendar", calendar_node)
+    builder.add_node("supervisor", supervisor)
+    builder.add_node("compliance_specialist", compliance_specialist)
+    builder.add_node("calendar_specialist", calendar_specialist)
+    builder.add_node("knowledge_specialist", knowledge_specialist)
     builder.add_node("critic", critic)
     builder.add_node("revise", revise)
     builder.add_node("reporter", reporter)
-    builder.add_edge(START, "intake")
-    builder.add_edge("intake", "compliance")
-    builder.add_edge("compliance", "calendar")
-    builder.add_edge("calendar", "critic")
+    builder.add_edge(START, "supervisor")
+
+    def dispatch_specialists(state: OperatorState) -> list[Send]:
+        sends = []
+        request = state["request"]
+        for name, node in (
+            ("compliance", "compliance_specialist"),
+            ("calendar", "calendar_specialist"),
+            ("knowledge", "knowledge_specialist"),
+        ):
+            if name in state.get("selected_slices", []):
+                sends.append(Send(node, {"request": request}))
+        if not sends:
+            sends.append(Send("critic", {}))
+        return sends
+
+    builder.add_conditional_edges("supervisor", dispatch_specialists)
+    builder.add_edge("compliance_specialist", "critic")
+    builder.add_edge("calendar_specialist", "critic")
+    builder.add_edge("knowledge_specialist", "critic")
 
     def after_critic(state: OperatorState) -> str:
         if (
@@ -168,12 +167,16 @@ def build_graph(client: HouseMCPClient | None = None):
     builder.add_conditional_edges(
         "critic", after_critic, {"revise": "revise", "reporter": "reporter"}
     )
-    builder.add_edge("revise", "intake")
+    builder.add_edge("revise", "supervisor")
     builder.add_edge("reporter", END)
     return builder.compile()
 
 
 async def run_request(request: RunRequest, client: HouseMCPClient | None = None) -> dict[str, Any]:
     graph = build_graph(client)
-    initial: OperatorState = {"run_id": str(uuid4()), "request": request.model_dump(mode="json")}
+    initial: OperatorState = {
+        "run_id": str(uuid4()),
+        "request": request.model_dump(mode="json"),
+        "tool_trace": [],
+    }
     return await graph.ainvoke(initial)

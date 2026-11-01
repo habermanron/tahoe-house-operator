@@ -4,7 +4,7 @@ VS Code-friendly starter for the compliance-and-calendar MVP described in the pr
 
 ## MVP boundary
 
-- LangGraph routes a request through deterministic compliance and calendar slices, a code-based critic, and a reporter.
+- LangGraph supervisor coordinates bounded Compliance, Calendar, Knowledge, and Scope specialists. Independent specialist checks run in parallel and return typed evidence to a code-based critic and reporter.
 - One House MCP server is the only tool boundary. It owns permit rules, calendar events, corpus search, and the local database.
 - A small synthetic fixture set is included. It is not real property, guest, or financial data.
 - The corpus supports local Chroma vector search when the model gateway has an embeddings model configured. Keyword fallback is available for offline development.
@@ -13,6 +13,10 @@ VS Code-friendly starter for the compliance-and-calendar MVP described in the pr
 - Free-text messages and recent chat turns are sent to the configured gateway for parsing; do not enter real guest or financial data in this synthetic MVP.
 - Calendar changes are proposals unless explicitly approved. The MVP does not send messages, modify listings, charge cards, or remit taxes.
 - The gateway is configurable; no model provider or credential is hard-coded. The deterministic workflow does not require a chat model.
+
+## Multi-agent coordination
+
+The supervisor creates a typed task plan and dispatches relevant work to the Compliance, Calendar, Knowledge, and Scope specialists. LangGraph runs selected specialists in parallel and joins their evidence and tool traces at a code-based critic. Specialists have narrow tool allow-lists and do not call one another. The MVP does not activate Pricing, Turnover, Guest Desk, or Finance specialists; these remain later extensions. See [`docs/multi-agent-architecture-addendum.docx`](docs/multi-agent-architecture-addendum.docx) and its editable Markdown source.
 
 ## Requirements
 
@@ -82,10 +86,11 @@ uv run ruff check .
 
 ```text
 src/tahoe_operator/
-  chat.py             gateway-backed free-text plan + MCP execution
+  chat.py             supervisor chat graph, specialist fan-out, critic, and response
+  agents/             tool-scoped Compliance, Calendar, Knowledge, and Scope specialists
   api.py             FastAPI operator API and trace page
   config.py          environment and gateway settings
-  graph.py           LangGraph control path and critic
+  graph.py           supervisor, parallel specialist checks, and critic
   house_client.py    LangGraph-to-House-MCP client
   mcp_server.py      single MCP tool server
   services.py        deterministic compliance/calendar services
@@ -95,6 +100,7 @@ data/
   corpus/             synthetic permit and house-rule documents
   fixtures/           fictional permit, weather, and calendar events
 tests/                deterministic service, graph, and chat tests
+docs/                 multi-agent design addendum and architecture diagram
 .vscode/              interpreter, tasks, extensions, and launch config
 ```
 

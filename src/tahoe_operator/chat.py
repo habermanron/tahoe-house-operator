@@ -1,12 +1,18 @@
+import operator
 import re
-from datetime import date, datetime
-from typing import Any, TypedDict
+from datetime import datetime
+from typing import Annotated, Any, TypedDict
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 from openai import AsyncOpenAI
 
+from tahoe_operator.agents.calendar import CalendarSpecialist
+from tahoe_operator.agents.compliance import ComplianceSpecialist
+from tahoe_operator.agents.knowledge import KnowledgeSpecialist
+from tahoe_operator.agents.scope import ScopeSpecialist
 from tahoe_operator.config import get_settings
 from tahoe_operator.house_client import HouseMCPClient
 from tahoe_operator.schemas import ChatPlan, ChatRequest, ChatTask
@@ -127,102 +133,16 @@ class ChatState(TypedDict, total=False):
     message: str
     history: list[dict[str, str]]
     plan: dict[str, Any]
-    evidence: list[dict[str, Any]]
-    tool_trace: list[dict[str, Any]]
+    compliance_tasks: list[dict[str, Any]]
+    calendar_tasks: list[dict[str, Any]]
+    knowledge_tasks: list[dict[str, Any]]
+    scope_tasks: list[dict[str, Any]]
+    evidence: Annotated[list[dict[str, Any]], operator.add]
+    tool_trace: Annotated[list[dict[str, Any]], operator.add]
     critic: dict[str, Any]
     answer: str
     citations: list[dict[str, Any]]
     tasks: list[dict[str, Any]]
-
-
-def _tool_date(value: date | None) -> str | None:
-    return value.isoformat() if value else None
-
-
-async def _run_task(
-    task: ChatTask, house: HouseMCPClient
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    trace: list[dict[str, Any]] = []
-
-    async def call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        result = await house.call_tool(name, arguments)
-        trace.append({"tool": name, "arguments": arguments, "result": result})
-        return result
-
-    if task.kind == "occupancy":
-        permit, limit = await call("get_permit", {}), await call("occupancy_limit", {})
-        return {"kind": task.kind, "permit": permit, "occupancy": limit}, trace
-
-    if task.kind == "availability":
-        if not task.start_date or not task.end_date:
-            return {"kind": task.kind, "needs_clarification": True}, trace
-        start, end = _tool_date(task.start_date), _tool_date(task.end_date)
-        timeline = await call("get_timeline", {"start_date": start, "end_date": end})
-        gaps = await call("find_gaps", {"start_date": start, "end_date": end})
-        conflicts = [
-            event
-            for event in timeline.get("events", [])
-            if event.get("event_type") in {"owner_block", "booking", "hold", "maintenance"}
-        ]
-        return {
-            "kind": task.kind,
-            "timeline": timeline,
-            "gaps": gaps,
-            "conflicts": conflicts,
-        }, trace
-
-    if task.kind == "stay_check":
-        if (
-            not task.start_date
-            or not task.end_date
-            or task.guest_count is None
-            or task.renter_age is None
-        ):
-            return {"kind": task.kind, "needs_clarification": True}, trace
-        start, end = _tool_date(task.start_date), _tool_date(task.end_date)
-        stay = await call(
-            "check_stay",
-            {
-                "start_date": start,
-                "end_date": end,
-                "guest_count": task.guest_count,
-                "renter_age": task.renter_age,
-                "vehicles": task.vehicles or 0,
-            },
-        )
-        parking = await call("check_parking", {"check_date": start, "vehicles": task.vehicles or 0})
-        timeline = await call("get_timeline", {"start_date": start, "end_date": end})
-        conflicts = [
-            event
-            for event in timeline.get("events", [])
-            if event.get("event_type") in {"owner_block", "booking", "hold", "maintenance"}
-        ]
-        return {"kind": task.kind, "stay": stay, "parking": parking, "conflicts": conflicts}, trace
-
-    if task.kind == "trash_check":
-        if not task.check_date:
-            return {"kind": task.kind, "needs_clarification": True}, trace
-        result = await call("check_trash", {"check_date": _tool_date(task.check_date)})
-        return {"kind": task.kind, "result": result}, trace
-
-    if task.kind == "parking_check":
-        if not task.check_date or task.vehicles is None:
-            return {"kind": task.kind, "needs_clarification": True}, trace
-        result = await call(
-            "check_parking",
-            {
-                "check_date": _tool_date(task.check_date),
-                "vehicles": task.vehicles,
-            },
-        )
-        return {"kind": task.kind, "result": result}, trace
-
-    if task.kind == "rules_search":
-        query = task.query or "property rules"
-        result = await call("search_corpus", {"query": query, "limit": 4})
-        return {"kind": task.kind, "result": result}, trace
-
-    return {"kind": "feature_status"}, trace
 
 
 def _citations(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -306,6 +226,17 @@ def _format_answer(
                 item.get("parking", {}),
                 item.get("conflicts", []),
             )
+            calendar_result = next(
+                (
+                    result
+                    for result in evidence
+                    if result.get("kind") == "stay_calendar"
+                    and result.get("start_date") == item.get("start_date")
+                    and result.get("end_date") == item.get("end_date")
+                ),
+                {},
+            )
+            conflicts = conflicts or calendar_result.get("conflicts", [])
             checks = [stay.get("status", "unknown"), parking.get("status", "unknown")]
             if conflicts:
                 checks.append("calendar conflict")
@@ -349,6 +280,9 @@ def _format_answer(
                 "stored-rule questions. Pricing, turnover, guest messaging, finance, "
                 "and payments are not implemented."
             )
+        elif kind == "stay_calendar":
+            # This specialist result is combined with the matching compliance result above.
+            continue
 
     if plan.clarifying_question:
         lines.append(plan.clarifying_question)
@@ -374,30 +308,62 @@ async def run_chat(
     house = house or HouseMCPClient()
     planner = planner or GatewayPlanner()
     memory = memory or ShortTermChatMemory()
+    compliance_agent = ComplianceSpecialist(house)
+    calendar_agent = CalendarSpecialist(house)
+    knowledge_agent = KnowledgeSpecialist(house)
+    scope_agent = ScopeSpecialist()
 
-    async def understand(state: ChatState) -> dict[str, Any]:
+    async def supervisor(state: ChatState) -> dict[str, Any]:
         plan = await planner.plan(state["message"], state["history"])
-        return {"plan": plan.model_dump(mode="json")}
-
-    async def execute_tools(state: ChatState) -> dict[str, Any]:
-        plan = ChatPlan.model_validate(state["plan"])
-        evidence: list[dict[str, Any]] = []
-        trace: list[dict[str, Any]] = []
+        grouped: dict[str, list[dict[str, Any]]] = {
+            "compliance_tasks": [],
+            "calendar_tasks": [],
+            "knowledge_tasks": [],
+            "scope_tasks": [],
+        }
         for task in plan.tasks:
-            result, calls = await _run_task(task, house)
+            data = task.model_dump(mode="json")
+            if task.kind in {"occupancy", "stay_check", "trash_check", "parking_check"}:
+                grouped["compliance_tasks"].append(data)
+            if task.kind in {"availability", "stay_check"}:
+                grouped["calendar_tasks"].append(data)
+            if task.kind == "rules_search":
+                grouped["knowledge_tasks"].append(data)
+            if task.kind == "feature_status":
+                grouped["scope_tasks"].append(data)
+        return {"plan": plan.model_dump(mode="json"), **grouped}
+
+    async def run_compliance(state: ChatState) -> dict[str, Any]:
+        evidence, trace = [], []
+        for raw_task in state.get("compliance_tasks", []):
+            result, calls = await compliance_agent.execute_task(ChatTask.model_validate(raw_task))
             evidence.append(result)
             trace.extend(calls)
         return {"evidence": evidence, "tool_trace": trace}
 
-    async def respond(state: ChatState) -> dict[str, Any]:
-        plan = ChatPlan.model_validate(state["plan"])
-        answer, citations = _format_answer(plan, state.get("evidence", []))
-        memory.add_turn(state["session_id"], state["message"], answer)
-        return {
-            "answer": answer,
-            "citations": citations,
-            "tasks": [task.model_dump(mode="json") for task in plan.tasks],
-        }
+    async def run_calendar(state: ChatState) -> dict[str, Any]:
+        evidence, trace = [], []
+        for raw_task in state.get("calendar_tasks", []):
+            result, calls = await calendar_agent.execute_task(ChatTask.model_validate(raw_task))
+            evidence.append(result)
+            trace.extend(calls)
+        return {"evidence": evidence, "tool_trace": trace}
+
+    async def run_knowledge(state: ChatState) -> dict[str, Any]:
+        evidence, trace = [], []
+        for raw_task in state.get("knowledge_tasks", []):
+            result, calls = await knowledge_agent.execute_task(ChatTask.model_validate(raw_task))
+            evidence.append(result)
+            trace.extend(calls)
+        return {"evidence": evidence, "tool_trace": trace}
+
+    async def run_scope(state: ChatState) -> dict[str, Any]:
+        evidence, trace = [], []
+        for raw_task in state.get("scope_tasks", []):
+            result, calls = await scope_agent.execute_task(ChatTask.model_validate(raw_task))
+            evidence.append(result)
+            trace.extend(calls)
+        return {"evidence": evidence, "tool_trace": trace}
 
     async def critic(state: ChatState) -> dict[str, Any]:
         failures = []
@@ -410,8 +376,8 @@ async def run_chat(
                     failures.append("stay_check_failed")
                 if item.get("parking", {}).get("status") != "pass":
                     failures.append("parking_check_failed")
-                if item.get("conflicts"):
-                    failures.append("calendar_conflict")
+            elif kind == "stay_calendar" and item.get("conflicts"):
+                failures.append("calendar_conflict")
             elif kind in {"trash_check", "parking_check"}:
                 if item.get("result", {}).get("status") != "pass":
                     failures.append(f"{kind}_failed")
@@ -422,25 +388,65 @@ async def run_chat(
                 "status": "needs_operator_review" if failures else "pass",
                 "reasons": list(dict.fromkeys(failures)),
                 "tools_called": False,
+                "specialists_reviewed": [
+                    "compliance",
+                    "calendar",
+                    "knowledge",
+                    "scope",
+                ],
             }
         }
 
+    async def reporter(state: ChatState) -> dict[str, Any]:
+        plan = ChatPlan.model_validate(state["plan"])
+        answer, citations = _format_answer(plan, state.get("evidence", []))
+        memory.add_turn(state["session_id"], state["message"], answer)
+        return {
+            "answer": answer,
+            "citations": citations,
+            "tasks": [task.model_dump(mode="json") for task in plan.tasks],
+        }
+
     builder = StateGraph(ChatState)
-    builder.add_node("understand", understand)
-    builder.add_node("execute_tools", execute_tools)
+    builder.add_node("supervisor", supervisor)
+    builder.add_node("compliance_specialist", run_compliance)
+    builder.add_node("calendar_specialist", run_calendar)
+    builder.add_node("knowledge_specialist", run_knowledge)
+    builder.add_node("scope_specialist", run_scope)
     builder.add_node("critic", critic)
-    builder.add_node("respond", respond)
-    builder.add_edge(START, "understand")
-    builder.add_edge("understand", "execute_tools")
-    builder.add_edge("execute_tools", "critic")
-    builder.add_edge("critic", "respond")
-    builder.add_edge("respond", END)
+    builder.add_node("reporter", reporter)
+    builder.add_edge(START, "supervisor")
+
+    def dispatch_specialists(state: ChatState) -> list[Send]:
+        sends = []
+        for key, node in (
+            ("compliance_tasks", "compliance_specialist"),
+            ("calendar_tasks", "calendar_specialist"),
+            ("knowledge_tasks", "knowledge_specialist"),
+            ("scope_tasks", "scope_specialist"),
+        ):
+            tasks = state.get(key, [])
+            if tasks:
+                sends.append(Send(node, {key: tasks}))
+        if not sends:
+            sends.append(Send("critic", {"evidence": [], "tool_trace": []}))
+        return sends
+
+    builder.add_conditional_edges("supervisor", dispatch_specialists)
+    builder.add_edge("compliance_specialist", "critic")
+    builder.add_edge("calendar_specialist", "critic")
+    builder.add_edge("knowledge_specialist", "critic")
+    builder.add_edge("scope_specialist", "critic")
+    builder.add_edge("critic", "reporter")
+    builder.add_edge("reporter", END)
     graph = builder.compile()
     result = await graph.ainvoke(
         {
             "session_id": session_id,
             "message": request.message,
             "history": memory.recent(session_id),
+            "evidence": [],
+            "tool_trace": [],
         }
     )
     return {

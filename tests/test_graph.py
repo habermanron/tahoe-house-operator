@@ -27,6 +27,8 @@ class FakeHouseMCPClient:
                 else []
             )
             return {"events": events}
+        if name == "find_gaps":
+            return {"open_nights": [arguments["start_date"]], "events_considered": 0}
         raise AssertionError(f"Unexpected MCP tool: {name}")
 
 
